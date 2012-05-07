@@ -1,0 +1,451 @@
+/*
+* ausearch-lookup.c - Lookup values to something more readable
+* Copyright (c) 2005-06 Red Hat Inc., Durham, North Carolina.
+* All Rights Reserved. 
+*
+* This software may be freely redistributed and/or modified under the
+* terms of the GNU General Public License as published by the Free
+* Software Foundation; either version 2, or (at your option) any
+* later version.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+* GNU General Public License for more details.
+*
+* You should have received a copy of the GNU General Public License
+* along with this program; see the file COPYING. If not, write to the
+* Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+*
+* Authors:
+*   Steve Grubb <sgrubb@redhat.com>
+*/
+
+#include "config.h"
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <linux/net.h>
+#include "ausearch-lookup.h"
+#include "ausearch-options.h"
+#include "ausearch-nvpair.h"
+
+/* This is the name/value pair used by search tables */
+struct nv_pair {
+	int        value;
+	const char *name;
+};
+
+
+/* The machine based on elf type */
+static int machine = 0;
+static const char *Q = "?";
+static const char *results[3]= { "unset", "denied", "granted" };
+static const char *success[3]= { "unset", "no", "yes" };
+
+const char *aulookup_result(avc_t result)
+{
+	return results[result];
+}
+
+const char *aulookup_success(int s)
+{
+	switch (s)
+	{
+		default:
+			return success[0];
+			break;
+		case S_FAILED:
+			return success[1];
+			break;
+		case S_SUCCESS:
+			return success[2];
+			break;
+	}
+}
+
+const char *aulookup_syscall(llist *l, char *buf, size_t size)
+{
+	const char *sys;
+
+	if (report_format <= RPT_DEFAULT) {
+		snprintf(buf, size, "%d", l->s.syscall);
+		return buf;
+	}
+	machine = audit_elf_to_machine(l->s.arch);
+	if (machine < 0)
+		return Q;
+	sys = audit_syscall_to_name(l->s.syscall, machine);
+	if (sys) {
+		const char *func = NULL;
+		if (strcmp(sys, "socketcall") == 0) {
+			if (list_find_item(l, AUDIT_SYSCALL))
+				func = aulookup_socketcall((long)l->cur->a0);
+		} else if (strcmp(sys, "ipc") == 0) {
+			if(list_find_item(l, AUDIT_SYSCALL))
+				func = aulookup_ipccall((long)l->cur->a0);
+		}
+		if (func) {
+			snprintf(buf, size, "%s(%s)", sys, func);
+			return buf;
+		}
+		return sys;
+	}
+	snprintf(buf, size, "%d", l->s.syscall);
+	return buf;
+}
+
+static struct nv_pair socktab[] = {
+	{SYS_SOCKET, "socket"},
+	{SYS_BIND, "bind"},
+	{SYS_CONNECT, "connect"},
+	{SYS_LISTEN, "listen"},
+	{SYS_ACCEPT, "accept"},
+	{SYS_GETSOCKNAME, "getsockname"},
+	{SYS_GETPEERNAME, "getpeername"},
+	{SYS_SOCKETPAIR, "socketpair"},
+	{SYS_SEND, "send"},
+	{SYS_RECV, "recv"},
+	{SYS_SENDTO, "sendto"},
+	{SYS_RECVFROM, "recvfrom"},
+	{SYS_SHUTDOWN, "shutdown"},
+	{SYS_SETSOCKOPT, "setsockopt"},
+	{SYS_GETSOCKOPT, "getsockopt"},
+	{SYS_SENDMSG, "sendmsg"},
+	{SYS_RECVMSG, "recvmsg"}
+};
+#define SOCK_NAMES (sizeof(socktab)/sizeof(socktab[0]))
+
+const char *aulookup_socketcall(long sc)
+{
+        int i;
+
+        for (i = 0; i < SOCK_NAMES; i++)
+                if (socktab[i].value == sc)
+                        return socktab[i].name;
+
+        return NULL;
+}
+
+/* This is from asm/ipc.h. Copying it for now as some platforms
+ * have broken headers. */
+#define SEMOP            1
+#define SEMGET           2
+#define SEMCTL           3
+#define MSGSND          11
+#define MSGRCV          12
+#define MSGGET          13
+#define MSGCTL          14
+#define SHMAT           21
+#define SHMDT           22
+#define SHMGET          23
+#define SHMCTL          24
+
+/*
+ * This table maps ipc calls to their text name
+ */
+static struct nv_pair ipctab[] = {
+        {SEMOP, "semop"},
+        {SEMGET, "semget"},
+        {SEMCTL, "semctl"},
+        {MSGSND, "msgsnd"},
+        {MSGRCV, "msgrcv"},
+        {MSGGET, "msgget"},
+        {MSGCTL, "msgctl"},
+        {SHMAT, "shmat"},
+        {SHMDT, "shmdt"},
+        {SHMGET, "shmget"},
+        {SHMCTL, "shmctl"}
+};
+#define IPC_NAMES (sizeof(ipctab)/sizeof(ipctab[0]))
+
+const char *aulookup_ipccall(long ic)
+{
+        int i;
+
+        for (i = 0; i < IPC_NAMES; i++)
+                if (ipctab[i].value == ic)
+                        return ipctab[i].name;
+
+        return NULL;
+}
+
+static nvlist uid_nvl;
+static int uid_list_created=0;
+const char *aulookup_uid(uid_t uid, char *buf, size_t size)
+{
+	char *name = NULL;
+	int rc;
+
+	if (report_format <= RPT_DEFAULT) {
+		snprintf(buf, size, "%d", uid);
+		return buf;
+	}
+	if (uid == -1) {
+		snprintf(buf, size, "unset");
+		return buf;
+	}
+
+	// Check the cache first
+	if (uid_list_created == 0) {
+		nvlist_create(&uid_nvl);
+		nvlist_clear(&uid_nvl);
+		uid_list_created = 1;
+	}
+	rc = nvlist_find_val(&uid_nvl, uid);
+	if (rc) {
+		name = uid_nvl.cur->name;
+	} else {
+		// Add it to cache
+		struct passwd *pw;
+		pw = getpwuid(uid);
+		if (pw) {
+			nvnode nv;
+			nv.name = strdup(pw->pw_name);
+			nv.val = uid;
+			nvlist_append(&uid_nvl, &nv);
+			name = uid_nvl.cur->name;
+		}
+	}
+	if (name != NULL)
+		snprintf(buf, size, "%s", name);
+	else
+		snprintf(buf, size, "unknown(%d)", uid);
+	return buf;
+}
+
+void aulookup_destroy_uid_list(void)
+{
+	if (uid_list_created == 0)
+		return;
+
+	nvlist_clear(&uid_nvl); 
+	uid_list_created = 0;
+}
+
+static nvlist gid_nvl;
+static int gid_list_created=0;
+const char *aulookup_gid(gid_t gid, char *buf, size_t size)
+{
+	char *name = NULL;
+	int rc;
+
+	if (report_format <= RPT_DEFAULT) {
+		snprintf(buf, size, "%d", gid);
+		return buf;
+	}
+	if (gid == -1) {
+		snprintf(buf, size, "unset");
+		return buf;
+	}
+
+	// Check the cache first
+	if (gid_list_created == 0) {
+		nvlist_create(&gid_nvl);
+		nvlist_clear(&gid_nvl);
+		gid_list_created = 1;
+	}
+	rc = nvlist_find_val(&gid_nvl, gid);
+	if (rc) {
+		name = gid_nvl.cur->name;
+	} else {
+		// Add it to cache
+		struct group *gr;
+		gr = getgrgid(gid);
+		if (gr) {
+			nvnode nv;
+			nv.name = strdup(gr->gr_name);
+			nv.val = gid;
+			nvlist_append(&gid_nvl, &nv);
+			name = gid_nvl.cur->name;
+		}
+	}
+	if (name != NULL)
+		snprintf(buf, size, "%s", name);
+	else
+		snprintf(buf, size, "unknown(%d)", gid);
+	return buf;
+}
+
+void aulookup_destroy_gid_list(void)
+{
+	if (gid_list_created == 0)
+		return;
+
+	nvlist_clear(&gid_nvl); 
+	gid_list_created = 0;
+}
+
+int is_hex_string(const char *str)
+{
+	int c=0;
+	while (*str) {
+		if (!isxdigit(*str))
+			return 0;
+		str++;
+		c++;
+	}
+	return 1;
+}
+/*
+ * This function will take a pointer to a 2 byte Ascii character buffer and 
+ * return the actual hex value.
+ */
+static unsigned char x2c(unsigned char *buf)
+{
+	static const char AsciiArray[17] = "0123456789ABCDEF";
+	char *ptr;
+	unsigned char total=0;
+
+	ptr = strchr(AsciiArray, (char)toupper(buf[0]));
+	if (ptr)
+		total = (unsigned char)(((ptr-AsciiArray) & 0x0F)<<4);
+	ptr = strchr(AsciiArray, (char)toupper(buf[1]));
+	if (ptr)
+		total += (unsigned char)((ptr-AsciiArray) & 0x0F);
+
+	return total;
+}
+
+/* returns a freshly malloc'ed and converted buffer */
+char *unescape(char *buf)
+{
+	int len, i;
+	char saved, *ptr = buf, *str;
+
+	/* Find the end of the name */
+	if (*ptr == '(') {
+		ptr = strchr(ptr, ')');
+		if (ptr == NULL)
+			return NULL;
+		else
+			ptr++;
+	} else {
+		while (isxdigit(*ptr))
+			ptr++;
+	}
+	saved = *ptr;
+	*ptr = 0;
+	str = strdup(buf);
+	*ptr = saved;
+
+	if (*buf == '(')
+		return str;
+
+	/* We can get away with this since the buffer is 2 times
+	 * bigger than what we are putting there.
+	 */
+	len = strlen(str);
+	if (len < 2) {
+		free(str);
+		return NULL;
+	}
+	ptr = str;
+	for (i=0; i<len; i+=2) {
+		*ptr = x2c((unsigned char *)&str[i]);
+		ptr++;
+	}
+	*ptr = 0;
+	return str;
+}
+
+/* Represent c as a character within a quoted string, and append it to buf. */
+static void tty_printable_char(unsigned char c)
+{
+	if (c < 0x20 || c > 0x7E) {
+		putchar('\\');
+		putchar('0' + ((c >> 6) & 07));
+		putchar('0' + ((c >> 3) & 07));
+		putchar('0' + (c & 07));
+	} else {
+		if (c == '\\' || c ==  '"')
+			putchar('\\');
+		putchar(c);
+	}
+}
+
+/* Search for a name of a sequence of TTY bytes.
+ *  If found, return the name and advance *INPUT.
+ *  Return NULL otherwise. 
+ */
+static const char *tty_find_named_key(unsigned char **input, size_t input_len)
+{
+	/* NUL-terminated list of (sequence, NUL, name, NUL) entries.
+	   First match wins, even if a longer match were possible later */
+	static const unsigned char named_keys[] =
+#define E(SEQ, NAME) SEQ "\0" NAME "\0"
+#include "auparse/tty_named_keys.h"
+#undef E
+	"\0";
+
+	unsigned char *src;
+	const unsigned char *nk;
+
+	src = *input;
+	if (*src >= ' ' && (*src < 0x7F || *src >= 0xA0))
+		return NULL; /* Fast path */
+	nk = named_keys;
+	do {
+		const unsigned char *p;
+		size_t nk_len;
+
+		p = strchr((const char *)nk, '\0');
+		nk_len = p - nk;
+		if (nk_len <= input_len && memcmp(src, nk, nk_len) == 0) {
+			*input += nk_len;
+			return (const char *)(p + 1);
+		}
+		nk = strchr((const char *)p + 1, '\0') + 1;
+	} while (*nk != '\0');
+	return NULL;
+}
+
+void print_tty_data(const char *val)
+{
+	int need_comma, in_printable = 0;
+	unsigned char *data, *data_pos, *data_end;
+
+	if (!is_hex_string(val)) {
+		printf("%s", val);
+		return;
+	}
+
+	if ((data = unescape((char *)val)) == NULL) {
+		printf("conversion error(%s)", val);
+		return;
+	}
+
+	data_end = data + strlen(val) / 2;
+	data_pos = data;
+	need_comma = 0;
+	while (data_pos < data_end) {
+		/* FIXME: Unicode */
+		const char *desc;
+
+		desc = tty_find_named_key(&data_pos, data_end - data_pos);
+		if (desc != NULL) {
+			if (in_printable != 0) {
+				putchar('"');
+				in_printable = 0;
+			}
+			if (need_comma != 0)
+				putchar(',');
+			printf("<%s>", desc);
+		} else {
+			if (in_printable == 0) {
+				if (need_comma != 0)
+					putchar(',');
+				putchar('"');
+				in_printable = 1;
+			}
+			tty_printable_char(*data_pos);
+			data_pos++;
+		}
+		need_comma = 1;
+	}
+	if (in_printable != 0)
+		putchar('"');
+	free(data);
+}
+
