@@ -680,7 +680,7 @@ static int extract_timestamp(const char *b, au_event_t *e)
 	int rc = 1;
 
         e->host = NULL;
-	tmp = strndupa(b, 80);
+	tmp = strndupa(b, 100);
 	ptr = strtok(tmp, " ");
 	if (ptr) {
 		// Optionally grab the node - may or may not be included

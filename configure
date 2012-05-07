@@ -13027,7 +13027,7 @@ $as_echo "no" >&6; }
 
 
 
-ac_config_files="$ac_config_files Makefile lib/Makefile lib/test/Makefile auparse/Makefile auparse/test/Makefile src/Makefile src/mt/Makefile src/libev/Makefile src/test/Makefile swig/Makefile docs/Makefile init.d/Makefile audisp/Makefile audisp/plugins/Makefile audisp/plugins/builtins/Makefile audisp/plugins/prelude/Makefile audisp/plugins/remote/Makefile audisp/plugins/zos-remote/Makefile bindings/Makefile bindings/python/Makefile tools/Makefile tools/aulast/Makefile tools/aulastlog/Makefile tools/ausyscall/Makefile"
+ac_config_files="$ac_config_files Makefile lib/Makefile lib/test/Makefile auparse/Makefile auparse/test/Makefile src/Makefile src/mt/Makefile src/libev/Makefile src/test/Makefile swig/Makefile docs/Makefile init.d/Makefile audisp/Makefile audisp/plugins/Makefile audisp/plugins/builtins/Makefile audisp/plugins/prelude/Makefile audisp/plugins/remote/Makefile audisp/plugins/zos-remote/Makefile bindings/Makefile bindings/python/Makefile tools/Makefile tools/aulast/Makefile tools/aulastlog/Makefile tools/ausyscall/Makefile audisp/plugins/cef/Makefile"
 
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
@@ -14053,6 +14053,7 @@ do
     "audisp/plugins/prelude/Makefile") CONFIG_FILES="$CONFIG_FILES audisp/plugins/prelude/Makefile" ;;
     "audisp/plugins/remote/Makefile") CONFIG_FILES="$CONFIG_FILES audisp/plugins/remote/Makefile" ;;
     "audisp/plugins/zos-remote/Makefile") CONFIG_FILES="$CONFIG_FILES audisp/plugins/zos-remote/Makefile" ;;
+    "audisp/plugins/cef/Makefile") CONFIG_FILES="$CONFIG_FILES audisp/plugins/cef/Makefile" ;;
     "bindings/Makefile") CONFIG_FILES="$CONFIG_FILES bindings/Makefile" ;;
     "bindings/python/Makefile") CONFIG_FILES="$CONFIG_FILES bindings/python/Makefile" ;;
     "tools/Makefile") CONFIG_FILES="$CONFIG_FILES tools/Makefile" ;;

@@ -1,5 +1,6 @@
 # Makefile.am --
-# Copyright 2007-08 Red Hat Inc., Durham, North Carolina.
+# Copyright 2008 Red Hat Inc., Durham, North Carolina.
+# Copyright 2012 Mozilla Corporation
 # All Rights Reserved.
 #
 # This library is free software; you can redistribute it and/or
@@ -18,13 +19,27 @@
 #
 # Authors:
 #   Steve Grubb <sgrubb@redhat.com>
-#
+#   Guillaume Destuynder <gdestuynder@mozilla.com>
+# 
 
-CONFIG_CLEAN_FILES = *.loT *.rej *.orig
+CONFIG_CLEAN_FILES = Makefile.in *.loT *.rej *.orig
+EXTRA_DIST = audit-cef.conf $(man_MANS)
+AUTOMAKE_OPTIONS = no-dependencies
+INCLUDES = -I${top_srcdir} -I${top_srcdir}/lib 
+prog_confdir = $(sysconfdir)/audisp
+prog_conf = 
+plugin_confdir=$(prog_confdir)/plugins.d
+plugin_conf = audit-cef.conf
+man_MANS =
 
-SUBDIRS = builtins zos-remote remote cef
-#SUBDIRS = builtins zos-remote
-if HAVE_PRELUDE
-SUBDIRS += prelude
-endif
+audisp_cef_SOURCES = audisp-cef.c
+audisp_cef_CFLAGS = -fPIE -DPIE -g -D_REENTRANT -D_GNU_SOURCE -Wundef
+audisp_cef_LDFLAGS = -pie -Wl,-z,relro $(gss_libs)
+
+install-data-hook:
+	mkdir -p -m 0750 ${DESTDIR}${plugin_confdir}
+	$(INSTALL_DATA) -D -m 640 ${srcdir}/$(plugin_conf) ${DESTDIR}${plugin_confdir}
+
+uninstall-hook:
+	rm ${DESTDIR}${plugin_confdir}/$(plugin_conf)
 

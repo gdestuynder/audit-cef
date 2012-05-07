@@ -84,7 +84,7 @@ AM_RECURSIVE_TARGETS = $(RECURSIVE_TARGETS:-recursive=) \
 	distdir
 ETAGS = etags
 CTAGS = ctags
-DIST_SUBDIRS = builtins zos-remote remote prelude
+DIST_SUBDIRS = builtins zos-remote remote prelude cef
 DISTFILES = $(DIST_COMMON) $(DIST_SOURCES) $(TEXINFOS) $(EXTRA_DIST)
 am__relativize = \
   dir0=`pwd`; \
@@ -243,7 +243,7 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 CONFIG_CLEAN_FILES = *.loT *.rej *.orig
-SUBDIRS = builtins zos-remote remote $(am__append_1)
+SUBDIRS = builtins zos-remote remote $(am__append_1) cef
 all: all-recursive
 
 .SUFFIXES:
