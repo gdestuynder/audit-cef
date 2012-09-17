@@ -77,7 +77,7 @@ void clear_config(cef_conf_t *config)
 {
 	config->remote_server = NULL;
 	config->port = 514;
-	config->facility = LOG_LOCAL4;
+	config->facility = LOG_LOCAL5;
 }
 
 int load_config(cef_conf_t *config, const char *file)

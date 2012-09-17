@@ -52,10 +52,10 @@ static auparse_state_t *au = NULL;
 static struct passwd pwd;
 static char *buf;
 static size_t bufsize;
+static int machine = -1;
 
 static void handle_event(auparse_state_t *au,
 		auparse_cb_event_t cb_event_type, void *user_data);
-
 
 static void term_handler( int sig )
 {
@@ -100,8 +100,6 @@ int main(int argc, char *argv[])
 	sigaction(SIGTERM, &sa, NULL);
 	sa.sa_handler = hup_handler;
 
-	openlog("audit-cef", LOG_CONS, LOG_LOCAL5);
-
 	uname(&uts);
 	hostname = (char *)malloc(sizeof(uts.nodename));
 	sprintf(hostname, "%s", uts.nodename);
@@ -114,12 +112,18 @@ int main(int argc, char *argv[])
 	if (load_config(&config, CONFIG_FILE))
 		return 1;
 
+	openlog("audit-cef", LOG_CONS, config.facility);
+
 	au = auparse_init(AUSOURCE_FEED, 0);
 	if (au == NULL) {
 		syslog(LOG_ERR, "could not initialize auparse");
 		free_config(&config);
 		return -1;
 	}
+   
+   machine = audit_detect_machine();
+   if (machine < 0)
+       return -1;
 
 	auparse_add_callback(au, handle_event, NULL, NULL);
 
@@ -173,14 +177,17 @@ static void handle_event(auparse_state_t *au,
 	const char *key = NULL, *ppid = NULL, *pid = NULL, *auid = NULL, *uid = NULL, *gid = NULL, *euid = NULL, *suid = NULL;
 	const char *fsuid = NULL, *egid = NULL, *sgid = NULL, *fsgid = NULL, *tty = NULL, *exe = NULL, *ses = NULL;
 	const char *cwd = NULL, *argc = NULL, *cmd = NULL;
+	const char *syscall = NULL;
+	const char *fname = NULL, *inode = NULL, *dev = NULL, *mode = NULL, *ouid = NULL, *ogid = NULL, *rdev = NULL;
 	char fullcmd[1024] = "\0";
 	char fullcmdt[5] = "No\0";
 	char extra[1024] = "\0";
 	char extrat[5] = "No\0";
+   const char *sys;
 	int extralen = 0;
 
-	char msgname[16] = "\0", msgdesc[16] = "\0";
-	char *sppid = NULL, ppid_p[1024];
+	char msgname[16] = "\0", msgdesc[32] = "\0";
+	char sppid[256], ppid_p[1024];
 	FILE *fp;
 
 	char f[8];
@@ -201,10 +208,6 @@ static void handle_event(auparse_state_t *au,
 		au_time = auparse_get_time(au);
 		switch (type) {
 			case AUDIT_EXECVE:
-				havecef = 1;
-				strncpy(msgname, "EXECVE\0", 7);
-				strncpy(msgdesc, "Unix Exec\0", 10);
-
 				argc = auparse_find_field(au, "argc");
 				if (argc)
 					argcount = auparse_get_field_int(au);
@@ -238,7 +241,69 @@ static void handle_event(auparse_state_t *au,
 				else
 					extralen += snprintf(extra+extralen, 1024, " cwd\\=%s", cwd);
 				break;
+			case AUDIT_PATH:
+				fname = auparse_find_field(au, "name");
+				goto_record_type(au, type);
+				inode = auparse_find_field(au, "inode");
+				goto_record_type(au, type);
+				inode = auparse_find_field(au, "dev");
+				goto_record_type(au, type);
+				inode = auparse_find_field(au, "mode");
+				goto_record_type(au, type);
+				inode = auparse_find_field(au, "ouid");
+				goto_record_type(au, type);
+				inode = auparse_find_field(au, "ogid");
+				goto_record_type(au, type);
+				inode = auparse_find_field(au, "rdev");
+				goto_record_type(au, type);
+				if (extralen == 0) {
+					extralen += snprintf(extra+extralen, 1024, "inode\\=%s dev\\=%s mode\\=%s ouid\\=%s ogid\\=%s rdev\\=%s",
+						inode, dev, mode, ouid, ogid, rdev);
+				} else {
+					extralen += snprintf(extra+extralen, 1024, " inode\\=%s dev\\=%s mode\\=%s ouid\\=%s ogid\\=%s rdev\\=%s",
+						inode, dev, mode, ouid, ogid, rdev);
+				}
+				break;
 			case AUDIT_SYSCALL:
+				syscall = auparse_find_field(au, "syscall");
+				if (!syscall)
+					return;
+				i = auparse_get_field_int(au);
+               sys = audit_syscall_to_name(i, machine);
+               if (!sys) {
+                   syslog(LOG_INFO, "Unknown system call %u", i);
+                   return;
+               }
+
+               if (!strncmp(sys, "write", 5) || !strncmp(sys, "open", 4) || \
+                   !strncmp(sys, "unlink", 6)) {
+					havecef = i;
+					strncpy(msgname, "WRITE\0", 6);
+					strncpy(msgdesc, "Write or append to file\0", 24);
+               } else if (!strncmp(sys, "setxattr", 8)) {
+					havecef = i;
+					strncpy(msgname, "ATTR\0", 5);
+					strncpy(msgdesc, "Change file attributes\0", 23);
+				} else if (!strncmp(sys, "chmod", 5)) {
+					havecef = i;
+					strncpy(msgname, "CHMOD\0", 6);
+					strncpy(msgdesc, "CHMOD failed\0", 13);
+				} else if (!strncmp(sys, "chown", 5)) {
+					havecef = i;
+					strncpy(msgname, "CHOWN\0", 7);
+					strncpy(msgdesc, "CHOWN failed\0", 13);
+				} else if (!strncmp(sys, "ptrace",  6)) {
+					havecef = i;
+					strncpy(msgname, "PTRACE\0", 8);
+					strncpy(msgdesc, "PTRACE called\0", 14);
+				} else if (!strncmp(sys, "execve", 6)) {
+                   havecef = i;
+	    			strncpy(msgname, "EXECVE\0", 7);
+		    		strncpy(msgdesc, "Unix Exec\0", 10);
+               } else {
+                   syslog(LOG_INFO, "Unhandled system call %u %s", i, sys);
+               }
+
 				key = auparse_find_field(au, "key");
 				if (key)
 					key = auparse_interpret_field(au);
@@ -249,7 +314,7 @@ static void handle_event(auparse_state_t *au,
 					snprintf(ppid_p, 1024, "/proc/%d/status", i);
 					fp = fopen(ppid_p, "r");
 					if (fp) {
-						fscanf(fp, "Name: %s", sppid);
+						fscanf(fp, "Name: %255s", sppid);
 						fclose(fp);
 					}
 				}
@@ -273,6 +338,11 @@ static void handle_event(auparse_state_t *au,
 				}
 				goto_record_type(au, type);
 
+				tty = auparse_find_field(au, "tty");
+				if (tty)
+					tty = auparse_interpret_field(au);
+				goto_record_type(au, type);
+
 				gid = auparse_find_field(au, "gid");
 				goto_record_type(au, type);
 				euid = auparse_find_field(au, "euid");
@@ -287,19 +357,15 @@ static void handle_event(auparse_state_t *au,
 				goto_record_type(au, type);
 				fsgid = auparse_find_field(au, "fsgid");
 				goto_record_type(au, type);
-				tty = auparse_find_field(au, "tty");
-				if (tty)
-					tty = auparse_interpret_field(au);
-				goto_record_type(au, type);
 				ses = auparse_find_field(au, "ses");
 				goto_record_type(au, type);
 
 				if (extralen == 0) {
-					extralen += snprintf(extra+extralen, 1024, "gid\\=%s euid\\=%s suid\\=%s fsuid\\=%s egid\\=%s sgid\\=%s fsgid\\=%s tty\\=%s ses\\=%s",
-						gid, euid, suid, fsuid, egid, sgid, fsgid, tty, ses);
+					extralen += snprintf(extra+extralen, 1024, "gid\\=%s euid\\=%s suid\\=%s fsuid\\=%s egid\\=%s sgid\\=%s fsgid\\=%s ses\\=%s",
+						gid, euid, suid, fsuid, egid, sgid, fsgid, ses);
 				} else {
-					extralen += snprintf(extra+extralen, 1024, " gid\\=%s euid\\=%s suid\\=%s fsuid\\=%s egid\\=%s sgid\\=%s fsgid\\=%s tty\\=%s ses\\=%s",
-						gid, euid, suid, fsuid, egid, sgid, fsgid, tty, ses);
+					extralen += snprintf(extra+extralen, 1024, " gid\\=%s euid\\=%s suid\\=%s fsuid\\=%s egid\\=%s sgid\\=%s fsgid\\=%s ses\\=%s",
+						gid, euid, suid, fsuid, egid, sgid, fsgid, ses);
 				}
 
 				exe = auparse_find_field(au, "exe");
@@ -321,18 +387,18 @@ static void handle_event(auparse_state_t *au,
 	}
 
 	syslog(LOG_INFO, "CEF:0|Unix|auditd|1|%s|%s|3|end=%ld fname=%s dhost=%s suser=%s \
-cn1Label=uid cn1=%s cn2Label=auid cn2=%s \
+suid=%s dproc=%s msg=%s \
+cn1Label=auid cn1=%s \
 cs1Label=Command cs1=%s \
 cs2Label=Truncated cs2=%s \
 cs3Label=AuditKey cs3=%s \
-cs4Label=ParentProcess cs4=%s \
-cs5Label=ExtraInfo cs5=%s \
-cs6Label=ExtraTruncated cs6=%s\n",
+cs4Label=TTY cs4=%s \
+cs5Label=ParentProcess cs5=%s \
+cs6Label=MsgTruncated cs6=%s\n",
 		msgname, msgdesc, au_time,
-		exe, hostname, pwd.pw_name ? pwd.pw_name: NULL,
-		uid, auid,
+		fname, hostname, pwd.pw_name ? pwd.pw_name: NULL,
+		uid, exe, extra, auid,
 		fullcmd, fullcmdt,
-		key,
-		sppid,
-		extra, extrat);
+		key, tty,
+		sppid, extrat);
 }
