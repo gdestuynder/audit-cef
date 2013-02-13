@@ -42,6 +42,8 @@
 #include "cef-config.h"
 
 #define CONFIG_FILE "/etc/audisp/audisp-cef.conf"
+//This is the maximum arg len for commands before truncating. Syslog often will otherwise truncate the msg.
+#define MAX_ARG_LEN 512
 #define BUF_SIZE 32
 
 static volatile int stop = 0;
@@ -179,7 +181,7 @@ static void handle_event(auparse_state_t *au,
 	const char *cwd = NULL, *argc = NULL, *cmd = NULL;
 	const char *syscall = NULL;
 	const char *fname = NULL, *inode = NULL, *dev = NULL, *mode = NULL, *ouid = NULL, *ogid = NULL, *rdev = NULL;
-	char fullcmd[1024] = "\0";
+	char fullcmd[MAX_ARG_LEN+1] = "\0";
 	char fullcmdt[5] = "No\0";
 	char extra[1024] = "\0";
 	char extrat[5] = "No\0";
@@ -223,7 +225,7 @@ static void handle_event(auparse_state_t *au,
 					cmd = auparse_interpret_field(au);
 					if (!cmd)
 						continue;
-					if (1023-strlen(fullcmd) >= strlen(cmd))
+					if (MAX_ARG_LEN-strlen(fullcmd) > strlen(cmd))
 						if (len == 0)
 							len += sprintf(fullcmd+len, "%s", cmd);
 						else
