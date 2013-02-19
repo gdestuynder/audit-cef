@@ -45,6 +45,8 @@
 //This is the maximum arg len for commands before truncating. Syslog often will otherwise truncate the msg.
 #define MAX_ARG_LEN 512
 #define BUF_SIZE 32
+//Bump when the message is modifie
+#define CEF_AUDIT_MESSAGE_VERSION 2
 
 static volatile int stop = 0;
 static volatile int hup = 0;
@@ -272,7 +274,7 @@ static void handle_event(auparse_state_t *au,
 		.hdr		= "CEF:0",
 		.type		= "Unix",
 		.app		= "auditd",
-		.version	= 1,
+		.version	= CEF_AUDIT_MESSAGE_VERSION,
 		.severity	= 3,
 	};
 
