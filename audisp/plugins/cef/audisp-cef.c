@@ -261,7 +261,7 @@ void syslog_cef_msg(struct cef_msg_type cef_msg)
 			head = head->next;
 			free(prev);
 	}
-	syslog(LOG_INFO, msg);
+	syslog(LOG_INFO, "%s", msg);
 }
 
 static void handle_event(auparse_state_t *au,
