@@ -181,11 +181,11 @@ static int goto_record_type(auparse_state_t *au, int type)
 	return -1;
 }
 
-char *unescape(char *in)
+char *unescape(const char *in)
 {
-	char *dst = in;
+	char *dst = (char *)in;
 	char *s = dst;
-	char *src = in;
+	char *src = (char *)in;
 	char c;
 
 	while ((c = *src++) != '\0') {
@@ -196,7 +196,7 @@ char *unescape(char *in)
 	return s;
 }
 
-attr_t *cef_add_attr(attr_t *list, const char *st, char *val)
+attr_t *cef_add_attr(attr_t *list, const char *st, const char *val)
 {
 	attr_t *new;
 
@@ -235,7 +235,7 @@ char *get_username(int uid)
 char *get_proc_name(int pid)
 {
 	char p[1024];
-	char proc[64];
+	static char proc[64];
 	FILE *fp;
 	snprintf(p, 512, "/proc/%d/status", pid);
 	fp = fopen(p, "r");
@@ -279,7 +279,7 @@ static void handle_event(auparse_state_t *au,
 	};
 
 	const char *cwd = NULL, *argc = NULL, *cmd = NULL;
-	char *sys;
+	const char *sys;
 	const char *syscall = NULL;
 	char fullcmd[MAX_ARG_LEN+1] = "\0";
 	char fullcmdt[5] = "No\0";
